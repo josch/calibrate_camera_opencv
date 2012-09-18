@@ -8,6 +8,7 @@ if __name__ == "__main__":
     im = cv.LoadImage(filename, cv.CV_LOAD_IMAGE_GRAYSCALE)
     im3 = cv.LoadImage(filename, cv.CV_LOAD_IMAGE_COLOR)
     board_width, board_height = (4, 6)
+    square_size = 4
     corner_count = board_width * board_height
 
     found_all, corners = cv.FindChessboardCorners( im, (board_width, board_height))
@@ -24,19 +25,25 @@ if __name__ == "__main__":
         image_points = cv.CreateMat(corner_count, 2, cv.CV_32FC1)
         point_counts = cv.CreateMat(1, 1, cv.CV_32SC1)
         for jj in range(corner_count):
-            cv.Set2D(object_points, jj, 0, float(jj/board_width))
-            cv.Set2D(object_points, jj, 1, float(jj%board_width))
-            cv.Set2D(object_points, jj, 2, float(0.0))
+            #cv.Set2D(object_points, jj, 0, float(jj/board_width))
+            #cv.Set2D(object_points, jj, 1, float(jj%board_width))
+            #cv.Set2D(object_points, jj, 2, float(0.0))
             cv.Set2D(image_points, jj, 0, corners[jj][0])
             cv.Set2D(image_points, jj, 1, corners[jj][1])
+        for i in range(board_height):
+            for j in range(board_width):
+                cv.Set2D(object_points, i*board_width+j, 0, float(i*square_size))
+                cv.Set2D(object_points, i*board_width+j, 1, float(j*square_size))
+                cv.Set2D(object_points, i*board_width+j, 2, float(0.0))
+                print i*board_width+j, i*square_size, j*square_size
         cv.Set1D(point_counts, 0, corner_count)
         cv.CalibrateCamera2(object_points, image_points, point_counts, cv.GetSize(im3), camera_intrinsic_mat, distortion_mat, rotation_vecs, translation_vecs)
 
         undistorted = cv.CloneImage(im3);
 
         cv.Undistort2(im3, undistorted, camera_intrinsic_mat, distortion_mat)
-
         cv.ShowImage("win", undistorted);
+        #cv.ShowImage("win", im3);
         cv.WaitKey()
     else:
         print "not found"
