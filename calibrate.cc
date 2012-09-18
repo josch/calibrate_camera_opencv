@@ -25,8 +25,7 @@ int main(int argc, char** argv)
 	int specified_boards;
 	if (argc > 2) 
 		cerr << "Usage: ./calibrate [number of frames]\n";
-	else 
-	if (argc == 1) 
+	else if (argc == 1) 
 	{
 		user_mode = INTERACTIVE_MODE;
 		cout << "Camera calibration using interactive behavior. Press SPACE to grab frame.\n";
@@ -40,7 +39,7 @@ int main(int argc, char** argv)
 	}
 
 	VideoCapture capture(-1); // open the default camera
-	if(!capture.isOpened())  // check if opening camera stream succeeded
+	if (!capture.isOpened())  // check if opening camera stream succeeded
 	{
 		cerr << "Camera could not be found. Exiting.\n";
 		return -1;
@@ -50,11 +49,12 @@ int main(int argc, char** argv)
 	vector< vector <Point3f> > object_points;
   vector< vector <Point2f> > image_points;
 
-	Mat frame;
+	Mat frame, gray_frame;
 	for(int count = 0; ; ++count)
 	{
 		cout << "Frame: " << count << "\n";		
 	  capture >> frame; // get a new frame from camera
+		cvtColor(frame, gray_frame, CV_BGR2GRAY);
 	  imshow("Camera Image", frame);
 
 		int key_pressed = waitKey(0);
@@ -65,23 +65,23 @@ int main(int argc, char** argv)
 		{
 			Size pattern_size(COUNT_SQUARES_X, COUNT_SQUARES_Y); //interior number of corners
 			vector<Point2f> corners; //this will be filled by the detected corners
-			bool pattern_found = findChessboardCorners( frame, pattern_size, corners, CALIB_CB_ADAPTIVE_THRESH + CALIB_CB_NORMALIZE_IMAGE + CALIB_CB_FAST_CHECK);
+			bool pattern_found = findChessboardCorners( gray_frame, pattern_size, corners, CALIB_CB_ADAPTIVE_THRESH + CALIB_CB_NORMALIZE_IMAGE + CALIB_CB_FAST_CHECK);
 		
 			if (pattern_found) // to tweak params: http://bit.ly/QyoU3k
-				cornerSubPix(frame, corners, Size(11, 11), Size(-1, -1), TermCriteria(CV_TERMCRIT_EPS + CV_TERMCRIT_ITER, 30, 0.1));
+			{
+				cornerSubPix(gray_frame, corners, Size(11, 11), Size(-1, -1), TermCriteria(CV_TERMCRIT_EPS + CV_TERMCRIT_ITER, 30, 0.1));
+				drawChessboardCorners(frame, pattern_size, Mat(corners), pattern_found);
 
-			drawChessboardCorners(frame, pattern_size, Mat(corners), pattern_found);
-			
-			vector< Point3f > obj;
-	    for(int j = 0; j < COUNT_SQUARES_X * COUNT_SQUARES_Y; ++j)
-        obj.push_back(Point3f(j/COUNT_SQUARES_X, j%COUNT_SQUARES_X, 0.0f));
+				vector< Point3f > obj;
+			  for(int j = 0; j < COUNT_SQUARES_X * COUNT_SQUARES_Y; ++j)
+		      obj.push_back(Point3f(j/COUNT_SQUARES_X, j%COUNT_SQUARES_X, 0.0f));
 
-			if (pattern_found) {
 				image_points.push_back(corners);
         object_points.push_back(obj);
 				cout << "Frame " << count << " grabbed.\n";
 			}
 		}
+
 	}
 
 	
