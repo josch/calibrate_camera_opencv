@@ -19,11 +19,15 @@ enum { INTERACTIVE_MODE, PRESPECIFIED_MODE };
 #define COUNT_SQUARES_X 4
 #define COUNT_SQUARES_Y 6
 
-int detect_pattern(Mat frame, vector< vector<Point3f> >& object_points, vector<vector<Point2f> >& image_points)
+/**
+ * Method for detecting pattern in current frame. 
+ * Returns world and image coordinates of detected corners via out parameters.
+ */
+bool detectPattern(Mat frame, vector< vector<Point3f> >& object_points, vector<vector<Point2f> >& image_points)
 {
-  // interior number of corners
+  // number of squares in the pattern, a.k.a, interior number of corners
   Size pattern_size(COUNT_SQUARES_X, COUNT_SQUARES_Y);
-  // will be filled by the detected corners
+  // storage for the detected corners in findChessboardConrners
   vector<Point2f> corners;
 
   bool pattern_found = findChessboardCorners(
@@ -33,116 +37,193 @@ int detect_pattern(Mat frame, vector< vector<Point3f> >& object_points, vector<v
             CALIB_CB_FAST_CHECK);
 
   if (!pattern_found)
-    return -1;
+    return false;
 
-  // to tweak params: http://bit.ly/QyoU3k
+  // if corners are detected, they are further refined by calculating subpixel corners from the grayscale image
+  // this iterative process terminates after the given number of iterations and error epsilon
   cornerSubPix(frame, corners, Size(11, 11), Size(-1, -1),
                TermCriteria(CV_TERMCRIT_EPS + CV_TERMCRIT_ITER, 100,
                0.1));
+  // draw the detected corners as sanity check
   drawChessboardCorners(frame, pattern_size, Mat(corners),
                         pattern_found);
-  vector<Point3f> obj;
-  for (int j = 0; j < COUNT_SQUARES_X * COUNT_SQUARES_Y; ++j)
-    obj.push_back(Point3f(j / COUNT_SQUARES_X, j % COUNT_SQUARES_X, 0.0f));
 
-  object_points.push_back(obj);
+  // show detected corners in a different window
+  imshow("Detected pattern", frame);
+
+  // build a grid of 3D points (z component is 0 because the pattern is in one plane) to fit the square pattern area (COUNT_SQUARES_X * COUNT_SQUARES_Y)
+  vector<Point3f> pattern_points;
+  for (int j = 0; j < COUNT_SQUARES_X * COUNT_SQUARES_Y; ++j)
+    pattern_points.push_back(Point3f(j / COUNT_SQUARES_X, j % COUNT_SQUARES_X, 0.0f));
+
+  // populate image points with corners and object points with grid points
+  object_points.push_back(pattern_points);
   image_points.push_back(corners);
-  return 0;
+
+  return true;
 }
 
-int run_interactive()
+/**
+ * Main method for interactive behavior. 
+ * Requires user to present calibration pattern in front of camera. 
+ * By pressing SPACE the image is grabbed, pressing any other key loops through the camera stream, pressing ESC finishes calibration.
+ */
+int runInteractive()
 {
+  cout << "Camera calibration using interactive behavior. Press SPACE to grab frame, ESC to quit.\n";
+  // show camera image in a separate window
   namedWindow("Camera Image", CV_WINDOW_KEEPRATIO);
 
-  int count = 0;
-  Mat frame;
-  vector<vector<Point3f> > object_points;
-  vector<vector<Point2f> > image_points;
+  // current camera frame and first captured frame 
+  Mat frame, first_frame;
+  // storage for object points (world coords) and image points (image coords) for use in calibrateCamera 
+  vector< vector< Point3f > > object_points;
+  vector< vector< Point2f > > image_points;
+	// calibration parameters
   Mat intrinsic = Mat(3, 3, CV_32FC1);
   Mat distCoeffs;
   vector<Mat> rvecs, tvecs;
 
   // open the default camera
-  VideoCapture capture(-1);
+  VideoCapture capture(0);
 
   // check if opening camera stream succeeded
-  if (!capture.isOpened()) {
+  if (!capture.isOpened()) 
+  {
     cerr << "Camera could not be found. Exiting.\n";
     return -1;
   }
 
-  for (;;) {
-    cout << "Frame: " << count << endl;
-    Mat gray_frame;
-    capture >> frame;        // get a new frame from camera
-    cvtColor(frame, gray_frame, CV_BGR2GRAY);
-    imshow("Camera Image", frame);
+  // set frame width and height by hand, defaults to 160x120
+  capture.set (CV_CAP_PROP_FRAME_WIDTH, 640);
+  capture.set (CV_CAP_PROP_FRAME_HEIGHT, 480);
 
-    int key_pressed = waitKey(0);
+  // flag for determining whether pattern was detected in at least one of the camera grabs
+  bool calibration_ready = false;
+  // flag for detecting first frame with pattern
+	bool first_flag = true;
+
+  for (int count_frames = 0; ; ++count_frames) 
+  {
+    cout << "Frame: " << count_frames << endl;
+
+    capture >> frame; // get a new frame from camera
+    Mat gray_frame;
+    cvtColor(frame, gray_frame, CV_BGR2GRAY); // convert current frame to grayscale
+    imshow("Camera Image", frame); // update camera image
+
+    int key_pressed = waitKey(0); // get user key press
     if (key_pressed == KEY_CLOSE_WINDOW || key_pressed == KEY_ESCAPE)
       break;
 
-    if (key_pressed == KEY_SPACE) {
-      if (detect_pattern(gray_frame, object_points, image_points) == 0) {
-        cout << "Frame " << count << " grabbed." << endl;
-      } else {
-        cout << "pattern not found" << endl;
-      }
-    }
+    if (key_pressed == KEY_SPACE) 
+    {
+      if (detectPattern(gray_frame, object_points, image_points)) 
+      {
+        if (first_flag)
+        {
+          first_frame = frame; // save first frame for later use
+          first_flag = false;
+        }
+
+        cout << "Frame " << count_frames << " grabbed." << endl;
+				calibration_ready = true;
+      } 
+      else cout << "Pattern not found" << endl;
+    } 
+    else
+      continue;
+
+  }
+  
+  // if at least one video capture contains the pattern, perform calibration
+  if (calibration_ready) 
+  {
+    // perform calibration, obtain instrinsic parameters and distortion coefficients
+    cout << "Calibrating..." << endl;
+    calibrateCamera(object_points, image_points, frame.size(), intrinsic,
+                    distCoeffs, rvecs, tvecs);
+
+    Mat undistorted_frame;
+    // apply the calibration transformation to the first frame and store image on disk
+    undistort(first_frame, undistorted_frame, intrinsic, distCoeffs);
+    imwrite("first_frame.jpg", first_frame);
+    imwrite("undistorted_frame.jpg", undistorted_frame);
+    cout << "Applied undistortion to first frame (first_frame.jpg) and saved to undistorted_frame.jpg" << endl;
+    cout << "Intrinsic parameters:" << endl << intrinsic << endl;
+    cout << "Distortion coefficients:" << endl << distCoeffs << endl;
+  }
+  else 
+  {
+    cerr << "No pattern found in any video capture. Exiting." << endl;
   }
 
-  calibrateCamera(object_points, image_points, frame.size(), intrinsic,
-                  distCoeffs, rvecs, tvecs);
-
-  for (;;) {
-    capture >> frame;
-    Mat imageUndistorted;
-    undistort(frame, imageUndistorted, intrinsic, distCoeffs);
-    imshow("win1", frame);
-    imshow("win2", imageUndistorted);
-    waitKey(1);
-  }
-
+	// release camera
   capture.release();
 }
 
-int run_prespecified(int argc, char **argv)
+int runPrespecified(int argc, char **argv)
 {
-  int count = 0;
-  Mat frame;
+  // current camera frame and first captured frame 
+  Mat frame, first_frame;
+  // storage for object points (world coords) and image points (image coords) for use in calibrateCamera 
   vector<vector<Point3f> > object_points;
   vector<vector<Point2f> > image_points;
+	// calibration parameters
   Mat intrinsic = Mat(3, 3, CV_32FC1);
   Mat distCoeffs;
   vector<Mat> rvecs, tvecs;
 
-  for (int i = 0; i < argc; i++) {
+  // flag for determining whether pattern was detected in at least one of the images
+  bool calibration_ready = false;
+  // flag for detecting first frame with pattern
+  bool first_flag = true;
+
+	// loop through the specified images
+  for (int i = 0; i < argc; i++) 
+  {
     Mat gray_frame;
 		cerr << endl << argv[i] << endl;
     frame = imread(argv[i], CV_LOAD_IMAGE_COLOR);
     cvtColor(frame, gray_frame, CV_BGR2GRAY);
     imshow("Camera Image", frame);
-    if (detect_pattern(gray_frame, object_points, image_points) == 0) {
+		// apply pattern detection
+    if (detectPattern(gray_frame, object_points, image_points))
+    { 
+      if (first_flag) 
+      {
+        first_frame = frame;
+        first_flag = false;
+      }
       cout << "Frame " << i << " grabbed." << endl;
-    } else {
-      cout << "Pattern not found in frame " << i << endl;
+      calibration_ready = true;
     }
+    else 
+      cout << "Pattern not found in frame " << i << endl;
   }
 
-	cout << "Calibrating..." << endl;
-  calibrateCamera(object_points, image_points, frame.size(), intrinsic,
-                  distCoeffs, rvecs, tvecs);
+  // if at least one image contains the pattern, perform calibration
+	if (calibration_ready) 
+  {
+    // perform calibration, obtain instrinsic parameters and distortion coefficients
+    cout << "Calibrating..." << endl;
+    calibrateCamera(object_points, image_points, frame.size(), intrinsic,
+                    distCoeffs, rvecs, tvecs);
 
-  for (int i = 0; i < argc; i++) {
-    frame = imread(argv[i], CV_LOAD_IMAGE_COLOR);
-    Mat imageUndistorted;
-    undistort(frame, imageUndistorted, intrinsic, distCoeffs);
-    imshow("win1", frame);
-    imshow("win2", imageUndistorted);
-    waitKey(0);
+    Mat undistorted_frame;
+    // apply the calibration transformation to the first frame and store image on disk
+    undistort(first_frame, undistorted_frame, intrinsic, distCoeffs);
+    imwrite("first_frame.jpg", first_frame);
+    imwrite("undistorted_frame.jpg", undistorted_frame);
+    cout << "Applied undistortion to first frame (first_frame.jpg) and saved to undistorted_frame.jpg" << endl;
+    cout << "Intrinsic parameters:" << endl << intrinsic << endl;
+    cout << "Distortion coefficients:" << endl << distCoeffs << endl;
+  }
+  else 
+  {
+    cerr << "No pattern found in any of the images. Exiting." << endl;
   }
 
-  return 0;
 }
 
 int main(int argc, char **argv)
@@ -153,9 +234,9 @@ int main(int argc, char **argv)
   /* no arguments means interactive mode
    * one or more arguments are image filenames */
   if (argc == 1) {
-      run_interactive();
+      runInteractive();
   } else {
-      run_prespecified(argc-1, ++argv);
+      runPrespecified(argc-1, ++argv);
   }
 
   return 0;
