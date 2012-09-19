@@ -43,7 +43,7 @@ bool detectPattern(Mat frame, vector< vector<Point3f> >& object_points, vector<v
   // this iterative process terminates after the given number of iterations and error epsilon
   cornerSubPix(frame, corners, Size(11, 11), Size(-1, -1),
                TermCriteria(CV_TERMCRIT_EPS + CV_TERMCRIT_ITER, 100,
-               0.1));
+               0.15));
   // draw the detected corners as sanity check
   drawChessboardCorners(frame, pattern_size, Mat(corners),
                         pattern_found);
@@ -66,11 +66,11 @@ bool detectPattern(Mat frame, vector< vector<Point3f> >& object_points, vector<v
 /**
  * Main method for interactive behavior. 
  * Requires user to present calibration pattern in front of camera. 
- * By pressing SPACE the image is grabbed, pressing any other key loops through the camera stream, pressing ESC finishes calibration.
+ * By pressing any key an image is grabbed from the camera stream, pressing ESC finishes calibration.
  */
 int runInteractive()
 {
-  cout << "Camera calibration using interactive behavior. Press SPACE to grab frame, ESC to quit.\n";
+  cout << "Camera calibration using interactive behavior. Press any key to grab frame, ESC to perform calibration.\n";
   // show camera image in a separate window
   namedWindow("Camera Image", CV_WINDOW_KEEPRATIO);
 
@@ -115,8 +115,7 @@ int runInteractive()
     int key_pressed = waitKey(0); // get user key press
     if (key_pressed == KEY_CLOSE_WINDOW || key_pressed == KEY_ESCAPE)
       break;
-
-    if (key_pressed == KEY_SPACE) 
+    else 
     {
       if (detectPattern(gray_frame, object_points, image_points)) 
       {
@@ -131,8 +130,6 @@ int runInteractive()
       } 
       else cout << "Pattern not found" << endl;
     } 
-    else
-      continue;
 
   }
   
